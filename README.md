@@ -1,2 +1,1 @@
-# Cross-The-Wall
-"Beyond the barricade, is there a world you long to see?"
+This repository is a place to collect the latest tools or methods to bypass the china's great firewall.
