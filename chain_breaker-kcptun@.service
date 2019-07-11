@@ -1,0 +1,11 @@
+[Unit]
+Description=kcptun %I service
+PartOf=chain_breaker.service
+After=chain_breaker.service
+
+[Service]
+ExecStart=/bin/bash /root/kcptun/run.sh %i
+Restart=on-failure
+
+[Install]
+WantedBy=chain_breaker.service
