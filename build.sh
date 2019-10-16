@@ -64,6 +64,7 @@ else
 fi
 /root/udp2raw/udp2raw_amd64 -s -l\$ALL_IP:$UDP2RAW_PORT -r\$LOCAL_IP:\$REDIRECT_PORT -k "$UDP_PASS" --raw-mode faketcp -a --disable-color --cipher-mode xor --auth-mode simple --sock-buf 10240 --force-sock-buf
 EOF
+    systemctl enable udp2raw.service
 }
 
 install_speeder() {
@@ -132,13 +133,13 @@ install_v2ray() {
 wireguard_client_config() {
     cat <<EOF >/tmp/client.config
 [Interface]
-PrivateKey = $1
-Address = 10.0.0.2/24
+PrivateKey = $2
+Address = 10.0.0.$1/24
 DNS = 8.8.8.8, 1.1.1.1
 MTU = 1200
 
 [Peer]
-PublicKey = $2
+PublicKey = $3
 AllowedIPs = ::/0, 0.0.0.0/0
 Endpoint = 192.168.0.105:2111
 PersistentKeepalive = 25
@@ -150,25 +151,20 @@ install_wireguard() {
     apt-get update
     apt-get install wireguard qrencode -y
 
-    SERVER_KEY=$(wg genkey)
-    SERVER_KEY_PUB=$(echo $SERVER_KEY | wg pubkey)
-    CLIENT2_KEY=$(wg genkey)
-
-    CLIENT2_KEY_PUB=$(echo $CLIENT2_KEY | wg pubkey)
-    CLIENT3_KEY=$(wg genkey)
-    wireguard_client_config CLIENT3_KEY SERVER_KEY_PUB
-    qrencode -t ansiutf8 < /tmp/client.config > /root/client3.qrcode
-    CLIENT3_KEY_PUB=$(echo $CLIENT3_KEY | wg pubkey)
-
-    CLIENT4_KEY=$(wg genkey)
-    wireguard_client_config CLIENT4_KEY SERVER_KEY_PUB
-    qrencode -t ansiutf8 < /tmp/client.config > /root/client4.qrcode
-    CLIENT4_KEY_PUB=$(echo $CLIENT4_KEY | wg pubkey)
+    for i in {1..4}; do
+        WG_KEY[$i]=$(wg genkey)
+        WG_KEY_PUB[$i]=$(echo ${WG_KEY[$i]} | wg pubkey)
+        if [ $i != 1 ]; then
+            wireguard_client_config $i ${WG_KEY[$i]} ${WG_KEY_PUB[$i]}
+            qrencode -t ansiutf8 < /tmp/client.config > /root/client$i.qrcode
+            cp /tmp/client.config /root/client$i.conf
+        fi
+    done
 
     NET_INTERFACE=$(ls /sys/class/net | awk '/^e/{print}')
     cat <<EOF >/etc/wireguard/wg0.conf
 [Interface]
-  PrivateKey = $SERVER_KEY
+  PrivateKey = ${WG_KEY[1]}
   Address = 10.0.0.1/24
   PostUp   = echo 1 > /proc/sys/net/ipv4/ip_forward; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $NET_INTERFACE -j MASQUERADE
   PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $NET_INTERFACE -j MASQUERADE
@@ -177,13 +173,13 @@ install_wireguard() {
   MTU = 1200
 
 [Peer]
-  PublicKey = $CLIENT2_KEY_PUB
+  PublicKey = ${WG_KEY_PUB[2]}
   AllowedIPs = 10.0.0.2/32
 [Peer]
-  PublicKey = $CLIENT3_KEY_PUB
+  PublicKey = ${WG_KEY_PUB[3]}
   AllowedIPs = 10.0.0.3/32
 [Peer]
-  PublicKey = $CLIENT4_KEY_PUB
+  PublicKey = ${WG_KEY_PUB[4]}
   AllowedIPs = 10.0.0.4/32
 EOF
 }
@@ -230,13 +226,17 @@ main() {
     echo "udp2raw port: $UDP2RAW_PORT" >>/root/result.txt
     echo "udp2raw password: $UDP_PASS" >>/root/result.txt
     echo "speeder password: $SPEEDER_PASS" >>/root/result.txt
-    echo "wireguard server key: $SERVER_KEY_PUB" >>/root/result.txt
-    echo "wireguard client2 key: $CLIENT2_KEY" >>/root/result.txt
-    echo "wireguard client3 key: $CLIENT3_KEY" >>/root/result.txt
-    echo "wireguard client4 key: $CLIENT4_KEY" >>/root/result.txt
+    echo "wireguard server key: ${WG_KEY_PUB[1]}" >>/root/result.txt
+    echo "wireguard client2 key: ${WG_KEY[2]}" >>/root/result.txt
+    echo "wireguard client3 key: ${WG_KEY[3]}" >>/root/result.txt
+    echo "wireguard client4 key: ${WG_KEY[4]}" >>/root/result.txt
 
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/ipv6_change.sh -O /root/ipv6_change.sh
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker.sh -O /root/chain_breaker.sh
+    bash ipv6_change.sh
+    tar -cf /root/config.tar.gz /root/client* /root/result.txt
+
+    bash /root/chain_breaker.sh -i ipv6 -m wireguard -s game
 
     sleep 10
     reboot
