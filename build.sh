@@ -157,7 +157,6 @@ install_wireguard() {
         if [ $i != 1 ]; then
             wireguard_client_config $i ${WG_KEY[$i]} ${WG_KEY_PUB[$i]}
             qrencode -t ansiutf8 < /tmp/client.config > /root/client$i.qrcode
-            cp /tmp/client.config /root/client$i.conf
         fi
     done
 
