@@ -155,7 +155,7 @@ install_wireguard() {
         WG_KEY[$i]=$(wg genkey)
         WG_KEY_PUB[$i]=$(echo ${WG_KEY[$i]} | wg pubkey)
         if [ $i != 1 ]; then
-            wireguard_client_config $i ${WG_KEY[1]} ${WG_KEY_PUB[$i]}
+            wireguard_client_config $i ${WG_KEY[$i]} ${WG_KEY_PUB[1]}
             qrencode -t ansiutf8 < /tmp/client.config > /root/client$i.qrcode
         fi
     done
