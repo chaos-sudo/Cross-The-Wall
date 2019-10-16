@@ -28,4 +28,4 @@ else
 fi
 
 sed -i'.orig' "s|\(^IPv6: \).*|\1$random_ipv6|" /root/result.txt
-
+echo $random_ipv6

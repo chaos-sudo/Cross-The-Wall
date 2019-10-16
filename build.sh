@@ -155,7 +155,7 @@ install_wireguard() {
         WG_KEY[$i]=$(wg genkey)
         WG_KEY_PUB[$i]=$(echo ${WG_KEY[$i]} | wg pubkey)
         if [ $i != 1 ]; then
-            wireguard_client_config $i ${WG_KEY[$i]} ${WG_KEY_PUB[$i]}
+            wireguard_client_config $i ${WG_KEY[$i]} ${WG_KEY_PUB[1]}
             qrencode -t ansiutf8 < /tmp/client.config > /root/client$i.qrcode
         fi
     done
@@ -233,7 +233,8 @@ main() {
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/ipv6_change.sh -O /root/ipv6_change.sh
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker.sh -O /root/chain_breaker.sh
     bash ipv6_change.sh
-    tar -cf /root/config.tar.gz /root/client* /root/result.txt
+    cd /root
+    tar -cf config.tar.gz *.qrcode result.txt
 
     bash /root/chain_breaker.sh -i ipv6 -m wireguard -s game
 
