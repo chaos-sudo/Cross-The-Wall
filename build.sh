@@ -3,26 +3,27 @@
 # test environment: ubuntu 18.04+
 
 UDP2RAW_PACKAGE_URL="https://github.com/wangyu-/udp2raw-tunnel/releases/download/20181113.0/udp2raw_binaries.tar.gz"
+SPEEDER_PACKAGE_URL="https://github.com/wangyu-/UDPspeeder/releases/download/20190121.0/speederv2_binaries.tar.gz"
 VPS_IPv4=$(curl ifconfig.co -4)
 VPS_IPv6=$(curl ifconfig.co -6)
 
 apt-get update
 export DEBIAN_FRONTEND=noninteractive
 apt-get upgrade -y
-apt -y install libsodium-dev ufw moreutils jq curl wget tar util-linux gawk openssl
+apt -y install libsodium-dev ufw moreutils jq curl wget tar util-linux gawk openssl resolvconf
 
-function random_number() {
+random_number() {
     echo $(awk -v min=$1 -v max=$2 -v seed=$RANDOM 'BEGIN{srand(seed); print int(min+rand()*(max-min+1))}')
 }
 
-function specifying_parameters() {
+assign_parameters() {
     local ret=false
     local i=0
     until [ $ret = true ]; do
         local p=$(random_number 1100 65000)
         if ! [[ ${port_list[*]} =~ $p ]]; then
             port_list[$i]=$p
-            if [ $i == 4 ]; then
+            if [ $i == 3 ]; then
                 ret=true
             fi
             ((i++))
@@ -30,68 +31,164 @@ function specifying_parameters() {
     done
     USER_ID=$(uuidgen -t)
     UDP_PASS=$(openssl rand -base64 15)
+    SPEEDER_PASS=$(openssl rand -base64 15)
     V2RAY_PORT=${port_list[0]}
-    KCPTUN_IPV4_PORT=${port_list[1]}
-    KCPTUN_IPV6_PORT=${port_list[2]}
-    UDP2RAW_IPV4_PORT=${port_list[3]}
-    UDP2RAW_IPV6_PORT=${port_list[4]}
+    SPEEDER_PORT=${port_list[1]}
+    UDP2RAW_PORT=${port_list[2]}
+    WIREGUARD_PORT=${port_list[3]}
 }
 
-function configuring_kcptun() {
-    mkdir /root/kcptun
-    wget $(curl -s https://api.github.com/repos/xtaci/kcptun/releases/latest 2>/dev/null | jq -r '.assets[] | select(.browser_download_url | contains("linux-amd64")) | .browser_download_url') -O /root/kcptun/kcptun.tar.gz
-    tar xf /root/kcptun/kcptun.tar.gz -C /root/kcptun
-    chmod +x /root/kcptun/server_linux_amd64
-    cat <<EOF >/root/kcptun/run.sh
-if [ "\$1" == "ipv4" ]; then
-    LOCAL_IP="127.0.0.1"
-    PORT_LISTEN=$KCPTUN_IPV4_PORT
-else
-    LOCAL_IP="[::1]"
-    PORT_LISTEN=$KCPTUN_IPV6_PORT
-fi
-/root/kcptun/server_linux_amd64 -t "\$LOCAL_IP:$V2RAY_PORT" -l "\$LOCAL_IP:\$PORT_LISTEN" -mode fast3 -mtu 1250 --crypt none -sockbuf 16777217
-EOF
-}
-
-function configuring_udp2raw() {
+install_udp2raw() {
     mkdir /root/udp2raw
     wget $UDP2RAW_PACKAGE_URL -O /root/udp2raw/udp2raw.tar.gz
     tar xf /root/udp2raw/udp2raw.tar.gz -C /root/udp2raw
     chmod +x /root/udp2raw/udp2raw_amd64
+
     cat <<EOF >/root/udp2raw/run.sh
-if [ "\$1" == "ipv4" ]; then
+#!/bin/sh
+if [ "\$CHAIN_BREAKER_SPEEDER_ENABLE" == "true" ]; then
+    REDIRECT_PORT=$SPEEDER_PORT
+else
+    if [ "\$CHAIN_BREAKER_PROXY_METHOD" == "wireguard" ]; then
+        REDIRECT_PORT=$WIREGUARD_PORT
+    else
+        REDIRECT_PORT=$V2RAY_PORT
+    fi
+fi
+if [ "\$CHAIN_BREAKER_IP_VERSION" == "ipv4" ]; then
     LOCAL_IP="127.0.0.1"
     ALL_IP="0.0.0.0"
-    KCPTUN_PORT=$KCPTUN_IPV4_PORT
-    UDP2RAW_PORT=$UDP2RAW_IPV4_PORT
 else
     LOCAL_IP="[::1]"
     ALL_IP="[::]"
-    KCPTUN_PORT=$KCPTUN_IPV6_PORT
-    UDP2RAW_PORT=$UDP2RAW_IPV6_PORT
 fi
-/root/udp2raw/udp2raw_amd64 -s -l\$ALL_IP:\$UDP2RAW_PORT -r\$LOCAL_IP:\$KCPTUN_PORT -k "$UDP_PASS" --raw-mode faketcp -a --disable-color  --cipher-mode xor --auth-mode simple
+/root/udp2raw/udp2raw_amd64 -s -l\$ALL_IP:$UDP2RAW_PORT -r\$LOCAL_IP:\$REDIRECT_PORT -k "$UDP_PASS" --raw-mode faketcp -a --disable-color --cipher-mode xor --auth-mode simple --sock-buf 10240 --force-sock-buf
 EOF
 }
 
-function configuring_services() {
-    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker.service -O /etc/systemd/system/chain_breaker.service
-    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker-udp2raw%40.service -O /etc/systemd/system/chain_breaker-udp2raw@.service
-    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker-kcptun%40.service -O /etc/systemd/system/chain_breaker-kcptun@.service
-    systemctl enable chain_breaker chain_breaker-udp2raw@ipv4 chain_breaker-kcptun@ipv4 chain_breaker-udp2raw@ipv6 chain_breaker-kcptun@ipv6
-    systemctl start chain_breaker
+install_speeder() {
+    mkdir /root/speeder
+    wget $SPEEDER_PACKAGE_URL -O /root/speeder/speeder.tar.gz
+    tar xf /root/speeder/speeder.tar.gz -C /root/speeder
+    chmod +x /root/speeder/speederv2_amd64
+
+    cat <<EOF >/root/speeder/run.sh
+#!/bin/sh
+if [ "\$CHAIN_BREAKER_PROXY_METHOD" == "wireguard" ]; then
+    DESTINATION_PORT=$WIREGUARD_PORT
+else
+    DESTINATION_PORT=$V2RAY_PORT
+fi
+if [ "\$CHAIN_BREAKER_IP_VERSION" == "ipv4" ]; then
+    LOCAL_IP="127.0.0.1"
+else
+    LOCAL_IP="[::1]"
+fi
+if [ "\$CHAIN_BREAKER_SPEEDER_MODE" == "web" ]; then
+    /root/speeder/speederv2_amd64 -s -l"\$LOCAL_IP:$SPEEDER_PORT" -r"127.0.0.1:\$DESTINATION_PORT" --disable-color -k "$SPEEDER_PASS" --mode 0 -f20:10
+else
+    /root/speeder/speederv2_amd64 -s -l"\$LOCAL_IP:$SPEEDER_PORT" -r"127.0.0.1:\$DESTINATION_PORT" --disable-color -k "$SPEEDER_PASS" --mode 0 -f2:4 -q1
+fi
+EOF
 }
 
-function configuring_v2ray() {
+configure_services() {
+    cat <<EOF >/etc/systemd/system/udp2raw.service
+[Unit]
+Description=udp2raw service
+After=network.target
+Wants=network.target
+
+[Service]
+EnvironmentFile=/root/chain_breaker.conf
+ExecStart=/bin/bash /root/udp2raw/run.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat <<EOF >/etc/systemd/system/speeder.service
+[Unit]
+Description=speeder service
+Requires=udp2raw.service
+
+[Service]
+EnvironmentFile=/root/chain_breaker.conf
+ExecStart=/bin/bash /root/speeder/run.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+install_v2ray() {
     bash <(curl -L -s https://install.direct/go.sh)
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/v2ray_default.json -O /tmp/tmp1.json
     jq .inbound.port=$V2RAY_PORT /tmp/tmp1.json >/tmp/tmp2.json
     jq .inbound.settings.clients[].id=\"$USER_ID\" /tmp/tmp2.json >/etc/v2ray/config.json
-    systemctl enable v2ray
 }
 
-function optimizing_system() {
+wireguard_client_config() {
+    cat <<EOF >/tmp/client.config
+[Interface]
+PrivateKey = $1
+Address = 10.0.0.2/24
+DNS = 8.8.8.8, 1.1.1.1
+MTU = 1200
+
+[Peer]
+PublicKey = $2
+AllowedIPs = ::/0, 0.0.0.0/0
+Endpoint = 192.168.0.105:2111
+PersistentKeepalive = 25
+EOF
+}
+
+install_wireguard() {
+    add-apt-repository ppa:wireguard/wireguard -y
+    apt-get update
+    apt-get install wireguard qrencode -y
+
+    SERVER_KEY=$(wg genkey)
+    SERVER_KEY_PUB=$(echo $SERVER_KEY | wg pubkey)
+    CLIENT2_KEY=$(wg genkey)
+
+    CLIENT2_KEY_PUB=$(echo $CLIENT2_KEY | wg pubkey)
+    CLIENT3_KEY=$(wg genkey)
+    wireguard_client_config CLIENT3_KEY SERVER_KEY_PUB
+    qrencode -t ansiutf8 < /tmp/client.config > /root/client3.qrcode
+    CLIENT3_KEY_PUB=$(echo $CLIENT3_KEY | wg pubkey)
+
+    CLIENT4_KEY=$(wg genkey)
+    wireguard_client_config CLIENT4_KEY SERVER_KEY_PUB
+    qrencode -t ansiutf8 < /tmp/client.config > /root/client4.qrcode
+    CLIENT4_KEY_PUB=$(echo $CLIENT4_KEY | wg pubkey)
+
+    NET_INTERFACE=$(ls /sys/class/net | awk '/^e/{print}')
+    cat <<EOF >/etc/wireguard/wg0.conf
+[Interface]
+  PrivateKey = $SERVER_KEY
+  Address = 10.0.0.1/24
+  PostUp   = echo 1 > /proc/sys/net/ipv4/ip_forward; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $NET_INTERFACE -j MASQUERADE
+  PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $NET_INTERFACE -j MASQUERADE
+  ListenPort = $WIREGUARD_PORT
+  DNS = 8.8.8.8, 1.1.1.1
+  MTU = 1200
+
+[Peer]
+  PublicKey = $CLIENT2_KEY_PUB
+  AllowedIPs = 10.0.0.2/32
+[Peer]
+  PublicKey = $CLIENT3_KEY_PUB
+  AllowedIPs = 10.0.0.3/32
+[Peer]
+  PublicKey = $CLIENT4_KEY_PUB
+  AllowedIPs = 10.0.0.4/32
+EOF
+}
+
+optimize_system() {
     echo "ulimit -n 65535" >>/etc/profile
     echo "net.core.default_qdisc=fq" >>/etc/sysctl.conf
     echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.conf
@@ -110,25 +207,39 @@ function optimizing_system() {
     ufw allow https
     ufw allow ssh
     ufw allow $V2RAY_PORT
-    ufw allow $KCPTUN_IPV4_PORT
-    ufw allow $KCPTUN_IPV6_PORT
-    ufw allow $UDP2RAW_IPV4_PORT
-    ufw allow $UDP2RAW_IPV6_PORT
+    ufw allow $SPEEDER_PORT
+    ufw allow $UDP2RAW_PORT
+    ufw allow $WIREGUARD_PORT
     echo "y" | ufw enable
 }
 
-specifying_parameters
-configuring_v2ray
-configuring_kcptun
-configuring_udp2raw
-configuring_services
-optimizing_system
+main() {
+    assign_parameters
+    install_wireguard
+    install_v2ray
+    install_udp2raw
+    install_speeder
+    configure_services
+    optimize_system
 
-echo "v2ray uuid: $USER_ID" >/root/result.txt
-echo "IPv4: $VPS_IPv4" >>/root/result.txt
-echo "IPv6: $VPS_IPv6" >>/root/result.txt
-echo "v2ray port: $V2RAY_PORT" >>/root/result.txt
-echo "udp2raw ipv4 port: $UDP2RAW_IPV4_PORT" >>/root/result.txt
-echo "udp2raw ipv6 port: $UDP2RAW_IPV6_PORT" >>/root/result.txt
-echo "udp2raw password: $UDP_PASS" >>/root/result.txt
-reboot
+    echo "v2ray uuid: $USER_ID" >/root/result.txt
+    echo "IPv4: $VPS_IPv4" >>/root/result.txt
+    echo "IPv6: $VPS_IPv6" >>/root/result.txt
+    echo "v2ray port: $V2RAY_PORT" >>/root/result.txt
+    echo "wireguard port: $WIREGUARD_PORT" >>/root/result.txt
+    echo "udp2raw port: $UDP2RAW_PORT" >>/root/result.txt
+    echo "udp2raw password: $UDP_PASS" >>/root/result.txt
+    echo "speeder password: $SPEEDER_PASS" >>/root/result.txt
+    echo "wireguard server key: $SERVER_KEY_PUB" >>/root/result.txt
+    echo "wireguard client2 key: $CLIENT2_KEY" >>/root/result.txt
+    echo "wireguard client3 key: $CLIENT3_KEY" >>/root/result.txt
+    echo "wireguard client4 key: $CLIENT4_KEY" >>/root/result.txt
+
+    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/ipv6_change.sh -O /root/ipv6_change.sh
+    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker.sh -O /root/chain_breaker.sh
+
+    sleep 10
+    reboot
+}
+
+main
