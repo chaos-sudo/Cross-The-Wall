@@ -15,8 +15,8 @@ Ubuntu 18.04
 ### 使用方法
 在VPS网站上创建服务器时，添加下列语句到自定义配置脚本中，或手动运行：
 ```bash
-apt update
-apt install wget -y
+sudo apt update
+sudo apt install wget -y
 wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/build.sh -O /tmp/build.sh
-bash /tmp/build.sh
+sudo bash /tmp/build.sh
 ```

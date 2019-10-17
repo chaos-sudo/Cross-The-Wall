@@ -26,10 +26,13 @@ genExtra <- function(rid = 0.4, base = 2, probExp = 0.99, kmax = 2)
 	return( unlist(cbind(extraCand, winResult)[id,]) )
 }
 
-recommFEC <- function(sent, received)
+getRid <- function(sent, received) {
+	return(1 - received / sent)
+}
+
+recommFEC <- function(rid)
 {
 	# 给出单通道中，eg. client->server | server->client，数据包的发送和接收数量，计算推荐FEC配置
-	rid = 1 - received / sent
 	bases <- c(2, 10, 20)
 	# 可选的数据包发送基数
 	# bases <- 2*(1:10)
@@ -40,10 +43,9 @@ recommFEC <- function(sent, received)
 	
 }
 
-genFEC <- function(sent, received)
+genFEC <- function(rid)
 {
 	# 这是利用R内置函数qbinom进行计算的另一版本，差别在于首先给出的不是数据包发送基数，而是总数据包数量
-	rid = 1 - received / sent
 	# sapply(c(6,8,10,16,20,30,40,50), 
 	sapply(2*(1:20), 
 		   function(size)
@@ -56,7 +58,8 @@ genFEC <- function(sent, received)
 
 server_fec = 93462
 client_fec = 91031
-# recommFEC(server_fec, client_fec)
-# genFEC(server_fec, client_fec)
-1-client_fec/server_fec
-predictFEC(1-client_fec/server_fec, 2, 4)
+lossRate = getRid(server_fec, client_fec)
+# genFEC(0.65)
+# genFEC(0.65)
+# getRid(server_fec, client_fec)
+predictFEC(0.65, 2, 24)
