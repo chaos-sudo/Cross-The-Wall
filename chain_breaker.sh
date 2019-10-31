@@ -12,7 +12,13 @@ run_command() {
 
 usage() {
     BASH_NAME=$0
-    echo "usage: $BASH_NAME -i (IPver) -m (Method) [-s [Speeder_Mode]]"
+    echo "usage: $BASH_NAME [OPTIONS]"
+    echo "Option        GNU long option     Meaning"
+    echo "-i <n>        --ipver <n>         n: 4 | 6"
+    echo "-m <str>      --method <str>      str: v2ray | wireguard"
+    echo "-s <str>      --speeder <str>     if this option is set, enable speeder and str: web | game"
+    echo "-h            --help              show this help text and exit"
+
 }
 
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
@@ -23,10 +29,10 @@ fi
 ipvx=ipv6
 method=v2ray
 speeder="false"
-speeder_mode="game"
+speeder_mode=
 while [ "$1" != "" ]; do
     case $1 in
-        -i | --ip_version )     
+        -i | --ipver )     
             shift
             ipvx=$1
             ;;
@@ -74,8 +80,14 @@ else
     exit 1
 fi
 
-echo -e "CHAIN_BREAKER_IP_VERSION=$ipvx\nCHAIN_BREAKER_PROXY_METHOD=$method\nCHAIN_BREAKER_SPEEDER_ENABLE=$speeder\nCHAIN_BREAKER_SPEEDER_MODE=$speeder_mode" > /root/chain_breaker.conf
-#echo -e "CHAIN_BREAKER_IP_VERSION=$ipvx\nCHAIN_BREAKER_PROXY_METHOD=$method\nCHAIN_BREAKER_SPEEDER_ENABLE=$speeder\nCHAIN_BREAKER_SPEEDER_MODE=$speeder_mode"
+if [ "$DRY_RUN" == "True" ]; then
+    echo "##### Write words below to /root/chain_breaker.conf #####"
+    echo -e "CHAIN_BREAKER_IP_VERSION=$ipvx\nCHAIN_BREAKER_PROXY_METHOD=$method\nCHAIN_BREAKER_SPEEDER_ENABLE=$speeder\nCHAIN_BREAKER_SPEEDER_MODE=$speeder_mode"
+    echo "#########################################################"
+else
+    echo -e "CHAIN_BREAKER_IP_VERSION=$ipvx\nCHAIN_BREAKER_PROXY_METHOD=$method\nCHAIN_BREAKER_SPEEDER_ENABLE=$speeder\nCHAIN_BREAKER_SPEEDER_MODE=$speeder_mode" > /root/chain_breaker.conf
+fi
+
 run_command systemctl restart udp2raw.service
 
 if [ "$speeder" == "true" ]; then

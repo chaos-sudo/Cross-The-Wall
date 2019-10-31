@@ -231,13 +231,15 @@ main() {
     echo "wireguard client4 key: ${WG_KEY[4]}" >>/root/result.txt
 
     wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/chain_breaker.sh -O /root/chain_breaker.sh
-
+    wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/ipv6_change.sh -O /root/ipv6_change.sh
     if [ "$VPS_IPv6" != "" ]; then
-        wget https://raw.githubusercontent.com/chaos-sudo/Cross-The-Wall/master/ipv6_change.sh -O /root/ipv6_change.sh
         bash /root/ipv6_change.sh
-        bash /root/chain_breaker.sh -i ipv6 -m wireguard -s game
+    fi
+
+    if [ $# != 0 ]; then
+        bash /root/chain_breaker.sh $@
     else
-        bash /root/chain_breaker.sh -i ipv4 -m wireguard -s game
+        bash /root/chain_breaker.sh -i ipv4 -m v2ray -s web
     fi
 
     cd /root
@@ -254,4 +256,4 @@ main() {
     reboot
 }
 
-main $1
+main $@
